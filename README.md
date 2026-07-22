@@ -69,12 +69,27 @@ Built and tested against real Google Drive, a self-hosted n8n instance
 
 ![Dashboard showing a flagged item and run history](docs/dashboard_final.png)
 
+![The published n8n workflow: Google Drive Trigger → Download file → HTTP Request → If → Slack](docs/n8n_workflow/screenshots/n8n_workflow_published.png)
+
+![Real Slack notifications in #receipt-review from the live workflow](docs/n8n_workflow/screenshots/n8n_workflow_slack_messages.png)
+
+The actual n8n workflow (the real one that produced the proof above) is
+exported and included at
+[`docs/n8n_workflow/receipt_review_workflow.json`](docs/n8n_workflow/receipt_review_workflow.json),
+with the Slack webhook URL, Drive folder ID, and instance-specific
+credential IDs redacted — see
+[`docs/n8n_workflow/README.md`](docs/n8n_workflow/README.md) for what was
+redacted and how to import it into your own n8n instance.
+`docs/N8N_SETUP.md` covers the full setup (Docker, n8n, Google Drive,
+Slack) this workflow was built against.
+
 ## Running it locally
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env   # optional — only needed to enable the ai_vision engine
 uvicorn api.main:app --host 0.0.0.0 --port 8811
 ```
 
