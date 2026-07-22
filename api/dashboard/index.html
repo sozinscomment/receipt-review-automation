@@ -1,0 +1,269 @@
+<!-- LOGIC HEADER
+Input:          JSON from this same server's /runs and /flagged endpoints.
+Transformation: Render a single-page dashboard — recent run history plus a flagged-item
+                review queue with a one-click "mark reviewed" action — so a human
+                validator never has to open a spreadsheet or watch terminal output.
+Output:         A browser-rendered page, self-contained (no build step, no dependencies).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Receipt Review Dashboard</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --card: #ffffff;
+    --border: #e3e6ea;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #2f5d8a;
+    --accent-soft: #eaf1f8;
+    --warn: #b3541e;
+    --warn-soft: #fbe9dd;
+    --good: #2f7d4f;
+    --good-soft: #e6f4ea;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 24px 32px 8px;
+  }
+  header h1 { font-size: 20px; margin: 0 0 4px; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 16px 32px 48px;
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+  .stat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .stat .value { font-size: 26px; font-weight: 600; }
+  .stat .label { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+  section { margin-bottom: 32px; }
+  section h2 {
+    font-size: 15px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--muted); font-weight: 600; background: #fafbfc; }
+  tr:last-child td { border-bottom: none; }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .badge.flag { background: var(--warn-soft); color: var(--warn); }
+  .badge.ok { background: var(--good-soft); color: var(--good); }
+
+  button.review {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.review:hover { background: #244a6e; }
+  button.review:disabled { background: #c7cdd4; cursor: default; }
+
+  .empty {
+    color: var(--muted);
+    font-size: 14px;
+    padding: 20px;
+    text-align: center;
+  }
+
+  .toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Receipt Review Dashboard</h1>
+  <p>Live view of extraction runs and items that need a human look — no spreadsheet required.</p>
+</header>
+<main>
+  <div class="stats" id="stats"></div>
+
+  <section>
+    <h2>Flagged for review</h2>
+    <div class="toggle-row">
+      <label><input type="checkbox" id="onlyUnreviewed" checked> Show unreviewed only</label>
+    </div>
+    <div id="flaggedTableWrap"></div>
+  </section>
+
+  <section>
+    <h2>Recent runs</h2>
+    <div id="runsTableWrap"></div>
+  </section>
+</main>
+
+<script>
+async function fetchJSON(url, opts) {
+  const res = await fetch(url, opts);
+  if (!res.ok) throw new Error(`${url} -> ${res.status}`);
+  return res.json();
+}
+
+function fmtDate(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+function fmtMoney(v) {
+  return v === null || v === undefined ? "—" : Number(v).toFixed(2);
+}
+
+async function renderStats() {
+  const runs = await fetchJSON("/runs?limit=1");
+  const flaggedAll = await fetchJSON("/flagged");
+  const unreviewed = flaggedAll.filter(i => !i.reviewed);
+  const totalProcessed = (await fetchJSON("/runs")).reduce((sum, r) => sum + r.files_processed, 0);
+
+  const stats = [
+    { label: "Total files processed", value: totalProcessed },
+    { label: "Flagged items", value: flaggedAll.length },
+    { label: "Awaiting review", value: unreviewed.length },
+    { label: "Last run", value: runs.length ? fmtDate(runs[0].started_at) : "—" },
+  ];
+
+  document.getElementById("stats").innerHTML = stats.map(s => `
+    <div class="stat">
+      <div class="value">${s.value}</div>
+      <div class="label">${s.label}</div>
+    </div>
+  `).join("");
+}
+
+async function renderFlagged() {
+  const onlyUnreviewed = document.getElementById("onlyUnreviewed").checked;
+  const items = await fetchJSON(`/flagged?only_unreviewed=${onlyUnreviewed}`);
+  const wrap = document.getElementById("flaggedTableWrap");
+
+  if (!items.length) {
+    wrap.innerHTML = `<div class="empty">Nothing flagged${onlyUnreviewed ? " and unreviewed" : ""} right now.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = `
+    <table>
+      <thead>
+        <tr><th>File</th><th>Vendor</th><th>Date</th><th>Total</th><th>Reason</th><th>Status</th><th></th></tr>
+      </thead>
+      <tbody>
+        ${items.map(i => `
+          <tr data-id="${i.id}">
+            <td>${i.source_file}</td>
+            <td>${i.vendor || "—"}</td>
+            <td>${i.date || "—"}</td>
+            <td>${fmtMoney(i.total)}</td>
+            <td>${i.reason}</td>
+            <td>
+              ${i.reviewed
+                ? '<span class="badge ok">reviewed</span>'
+                : '<span class="badge flag">needs review</span>'}
+            </td>
+            <td>
+              <button class="review" ${i.reviewed ? "disabled" : ""} onclick="markReviewed(${i.id})">
+                ${i.reviewed ? "Done" : "Mark reviewed"}
+              </button>
+            </td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function renderRuns() {
+  const runs = await fetchJSON("/runs");
+  const wrap = document.getElementById("runsTableWrap");
+
+  if (!runs.length) {
+    wrap.innerHTML = `<div class="empty">No runs yet.</div>`;
+    return;
+  }
+
+  wrap.innerHTML = `
+    <table>
+      <thead>
+        <tr><th>Started</th><th>Engine</th><th>Files processed</th><th>Flagged</th><th>Duplicates</th></tr>
+      </thead>
+      <tbody>
+        ${runs.map(r => `
+          <tr>
+            <td>${fmtDate(r.started_at)}</td>
+            <td>${r.engine}</td>
+            <td>${r.files_processed}</td>
+            <td>${r.flagged_count}</td>
+            <td>${r.duplicate_count}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function markReviewed(id) {
+  await fetchJSON(`/flagged/${id}/review`, { method: "POST" });
+  await refreshAll();
+}
+
+async function refreshAll() {
+  await Promise.all([renderStats(), renderFlagged(), renderRuns()]);
+}
+
+document.getElementById("onlyUnreviewed").addEventListener("change", renderFlagged);
+refreshAll();
+setInterval(refreshAll, 15000); // light auto-refresh so a validator doesn't need to reload manually
+</script>
+</body>
+</html>

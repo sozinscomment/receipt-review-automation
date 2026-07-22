@@ -1,0 +1,17 @@
+# --- Secrets: Slack webhook URL, any future API keys, etc. ---
+.env
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# --- Runtime data: SQLite db + anything written by a real processing run ---
+data/
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db
